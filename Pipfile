@@ -8,6 +8,11 @@ django = "*"
 numpy = "*"
 statsmodels = "*"
 librosa = "*"
+django-cors-headers = "*"
+djangorestframework = "*"
+soundfile = "*"
+ffmpeg = "*"
+python-ffmpeg = "*"
 
 [dev-packages]
 
