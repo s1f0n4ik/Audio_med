@@ -3,6 +3,16 @@ import axios from 'axios';
 import { Chart } from 'chart.js/auto';
 
 const AudioTester = () => {
+  const [patientData, setPatientData] = useState({
+    lastName: '',
+    firstName: '',
+    middleName: '',
+    gender: 'M',
+    birthDate: '',
+    phone: '',
+    email: ''
+  });
+  const [showPatientForm, setShowPatientForm] = useState(false);
   const [responseData, setResponseData] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -58,7 +68,23 @@ const AudioTester = () => {
     }
   };
 
+  const handlePatientInputChange = (e) => {
+    const { name, value } = e.target;
+    setPatientData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const validatePatientData = () => {
+    return patientData.lastName.trim() && patientData.firstName.trim() && patientData.birthDate;
+  };
+
   const startTest = () => {
+    if (!validatePatientData()) {
+      alert('Пожалуйста, заполните обязательные поля: Фамилия, Имя и Дата рождения');
+      return;
+    }
     cleanupAudio();
     setIsRunning(true);
     setShowResults(false);
@@ -116,21 +142,21 @@ const AudioTester = () => {
   };
 
   const sendResults = async (data) => {
-        try {
-        const response = await axios.post('http://localhost:8000/api/save-results/', { data });
-        console.log('Server response:', response.data);
+    try {
+      const response = await axios.post('http://localhost:8000/api/save-results/', {
+        data,
+        patient: patientData
+      });
 
-        if (response.data.status === 'success' && response.data.thresholds) {
-          setResponseData(response.data);
-          renderAudiogram(response.data.thresholds);
-          setShowResults(true);
-        } else {
-          console.error('Invalid response format', response.data);
-        }
-      } catch (error) {
-        console.error("Ошибка сохранения:", error);
+      if (response.data.status === 'success') {
+        setResponseData(response.data);
+        renderAudiogram(response.data.thresholds);
+        setShowResults(true);
       }
-    };
+    } catch (error) {
+      console.error("Ошибка сохранения:", error);
+    }
+  };
 
   const renderAudiogram = (thresholds) => {
       console.log('Rendering audiogram with thresholds:', thresholds);
@@ -230,6 +256,95 @@ const AudioTester = () => {
 
   return (
     <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto', fontFamily: 'Arial' }}>
+      {!isRunning && !showResults && (
+        <div style={{ marginBottom: '30px', backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px' }}>
+          <h3 style={{ color: '#34495e', marginBottom: '15px' }}>Данные пациента</h3>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Фамилия*</label>
+              <input
+                type="text"
+                name="lastName"
+                value={patientData.lastName}
+                onChange={handlePatientInputChange}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                required
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Имя*</label>
+              <input
+                type="text"
+                name="firstName"
+                value={patientData.firstName}
+                onChange={handlePatientInputChange}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                required
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Отчество</label>
+              <input
+                type="text"
+                name="middleName"
+                value={patientData.middleName}
+                onChange={handlePatientInputChange}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Пол</label>
+              <select
+                name="gender"
+                value={patientData.gender}
+                onChange={handlePatientInputChange}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+              >
+                <option value="M">Мужской</option>
+                <option value="F">Женский</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Дата рождения*</label>
+              <input
+                type="date"
+                name="birthDate"
+                value={patientData.birthDate}
+                onChange={handlePatientInputChange}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                required
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Телефон</label>
+              <input
+                type="tel"
+                name="phone"
+                value={patientData.phone}
+                onChange={handlePatientInputChange}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+              />
+            </div>
+
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Email</label>
+              <input
+                type="email"
+                name="email"
+                value={patientData.email}
+                onChange={handlePatientInputChange}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       {!isRunning && !showResults ? (
         <div style={{ textAlign: 'center' }}>
           <h2 style={{ color: '#2c3e50' }}>Тест слуха</h2>
@@ -249,6 +364,20 @@ const AudioTester = () => {
           >
             Начать тест
           </button>
+          <button
+          onClick={() => window.location.href = '/tests'}
+          style={{
+            padding: '12px 30px',
+            fontSize: '16px',
+            backgroundColor: '#3498db',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer'
+          }}
+        >
+          Список исследований
+        </button>
         </div>
       ) : isRunning ? (
         <div style={{ textAlign: 'center' }}>
@@ -317,24 +446,52 @@ const AudioTester = () => {
             </p>
           </div>
 
-          <div style={{ textAlign: 'center', marginTop: '30px' }}>
-            <button
-              onClick={() => {
-                setShowResults(false);
-                startTest();
-              }}
-              style={{
-                padding: '12px 30px',
-                fontSize: '16px',
-                backgroundColor: '#3498db',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer'
-              }}
-            >
-              Пройти тест снова
-            </button>
+          <div style={{ textAlign: 'center', marginTop: '30px', display: 'flex', justifyContent: 'center', gap: '15px' }}>
+              <button
+                onClick={() => {
+                  setShowResults(false);
+                  startTest();
+                }}
+                style={{
+                  padding: '12px 30px',
+                  fontSize: '16px',
+                  backgroundColor: '#3498db',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                Пройти тест снова
+              </button>
+              <button
+                onClick={() => window.location.href = '/tests'}
+                style={{
+                  padding: '12px 30px',
+                  fontSize: '16px',
+                  backgroundColor: '#9b59b6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                История исследований
+              </button>
+              <button
+                onClick={() => window.location.href = '/'}
+                style={{
+                  padding: '12px 30px',
+                  fontSize: '16px',
+                  backgroundColor: '#9b59b6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                Домашняя страница
+              </button>
           </div>
         </div>
       )}
