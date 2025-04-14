@@ -27,7 +27,10 @@ const AudioTester = () => {
   const chartRef = useRef(null);
 
   const frequencies = [500, 1000, 2000, 4000, 8000];
-  const volumeSteps = [0.01, 0.02, 0.05, 0.1, 0.2];
+  const volumeSteps = [1, 2, 5];
+  const [stepSize, setStepSize] = useState(2);
+  const [calibrationData, setCalibrationData] = useState(null);
+  const [currentVolumeDb, setCurrentVolumeDb] = useState(50);
 
   // Очистка аудио ресурсов
   const cleanupAudio = () => {
@@ -67,7 +70,23 @@ const AudioTester = () => {
       console.error("Audio error:", error);
     }
   };
-
+  const calibrateAudio = async () => {
+  try {
+      const response = await axios.get('http://localhost:8000/api/calibration/');
+      setCalibrationData(response.data);
+    } catch (err) {
+      console.error('Calibration failed', err);
+    }
+  };
+  const playCalibratedTone = (freq, db) => {
+    if (!calibrationData || !calibrationData[freq]) {
+    console.error('Calibration data not available');
+    return;
+  }
+  const safeDb = Math.min(db, calibrationData[freq].max_db);
+  const calibratedVolume = (safeDb / 100) * calibrationData[freq].factor;
+  playTone(freq, calibratedVolume);
+};
   const handlePatientInputChange = (e) => {
     const { name, value } = e.target;
     setPatientData(prev => ({
@@ -91,7 +110,7 @@ const AudioTester = () => {
     setCurrentFrequency(frequencies[0]);
     setCurrentVolume(0.5);
     setResults([]);
-    playTone(frequencies[0], 0.5);
+    playCalibratedTone(frequencies[0], 50);
   };
 
   const handleResponse = (heard) => {
@@ -108,30 +127,30 @@ const AudioTester = () => {
     setResults(updatedResults);
 
     // Адаптация громкости
-    let newVolume = currentVolume;
+    let newVolumeDb = currentVolumeDb;
     if (heard) {
-      newVolume = Math.max(0.01, currentVolume - volumeSteps[step]);
+      newVolumeDb = Math.max(0, currentVolumeDb - stepSize);
     } else {
-      newVolume = Math.min(1.0, currentVolume + volumeSteps[step]);
+      newVolumeDb = Math.min(120, currentVolumeDb + stepSize);
     }
-    setCurrentVolume(newVolume);
+    setCurrentVolumeDb(newVolumeDb);
 
     // Проверяем, сколько раз тестировали текущую частоту
     const freqTests = updatedResults.filter(r => r.frequency === currentFrequency).length;
 
-    if (freqTests >= 3) {
+    if (freqTests >= 7) {
       // Переход к следующей частоте
       const nextIndex = frequencies.indexOf(currentFrequency) + 1;
       if (nextIndex < frequencies.length) {
         setCurrentFrequency(frequencies[nextIndex]);
-        setCurrentVolume(0.5); // Сброс громкости для новой частоты
-        playTone(frequencies[nextIndex], 0.5);
+        setCurrentVolume(50); // Сброс громкости для новой частоты
+        playCalibratedTone(frequencies[nextIndex], 50);
       } else {
         endTest();
       }
     } else {
       // Повтор теста с новой громкостью
-      setTimeout(() => playTone(currentFrequency, newVolume), 500);
+      setTimeout(() => playCalibratedTone(currentFrequency, newVolumeDb));
     }
   };
 
@@ -149,8 +168,11 @@ const AudioTester = () => {
       });
 
       if (response.data.status === 'success') {
-        setResponseData(response.data);
-        renderAudiogram(response.data.thresholds);
+        setResponseData({
+            ...response.data,
+            thresholds: response.data.thresholds || {},
+            reliabilities: response.data.reliabilities || {}
+        });
         setShowResults(true);
       }
     } catch (error) {
@@ -158,8 +180,13 @@ const AudioTester = () => {
     }
   };
 
-  const renderAudiogram = (thresholds) => {
+  const renderAudiogram = (thresholds, reliabilities) => {
       console.log('Rendering audiogram with thresholds:', thresholds);
+
+      if (!thresholds || !reliabilities) {
+        console.error('Missing thresholds or reliabilities');
+        return;
+      }
 
       // Ждем пока canvas станет доступен
       if (!chartRef.current) {
@@ -181,17 +208,25 @@ const AudioTester = () => {
 
       // Нормативные значения
       const normThresholds = {
-        '500': 0.1,
-        '1000': 0.08,
-        '2000': 0.05,
-        '4000': 0.03,
-        '8000': 0.02
+        '500': 20,
+        '1000': 15,
+        '2000': 10,
+        '4000': 5,
+        '8000': 0
       };
 
       // Подготовка данных
       const labels = ['500', '1000', '2000', '4000', '8000'].map(f => `${f} Гц`);
-      const userData = labels.map(label => thresholds[label.split(' ')[0]] || 1.0);
-      const normData = labels.map(label => normThresholds[label.split(' ')[0]] || 0);
+      const userData = labels.map(label => {
+        const freq = label.split(' ')[0];
+          return thresholds[freq] !== null ? thresholds[freq] : null;
+      });
+
+      const normData = labels.map(label => normThresholds[label.split(' ')[0]]);
+      const reliabilityColors = labels.map(label => {
+          const freq = label.split(' ')[0];
+          return reliabilities[freq] >= 0.8 ? '#4bc0c0' : '#ff6384';
+      });
 
       try {
         chartInstance.current = new Chart(ctx, {
@@ -202,31 +237,51 @@ const AudioTester = () => {
               {
                 label: 'Ваш слух',
                 data: userData,
-                borderColor: '#4bc0c0',
-                backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                tension: 0.1,
-                pointRadius: 6
+                borderColor: reliabilityColors,
+                backgroundColor: reliabilityColors.map(c => `${c}40`),
+                borderWidth: 2,
+                pointBackgroundColor: reliabilityColors,
+                pointRadius: 6,
+                pointHoverRadius: 8,
+                showLine: true,
+                spanGaps: true,
               },
               {
                 label: 'Норма',
                 data: normData,
                 borderColor: '#ff6384',
                 borderDash: [5, 5],
-                pointRadius: 4
+                pointRadius: 4,
+                backgroundColor: 'rgba(255, 99, 132, 0.1)'
               }
             ]
           },
           options: {
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: (context) => {
+                            const freq = context.label.split(' ')[0];
+                            const rel = reliabilities[freq];
+                            const relText = rel >= 0.8 ? 'Высокая' : 'Низкая';
+                            return [
+                                `${context.dataset.label}: ${context.parsed.y} дБ`,
+                                `Достоверность: ${relText} (${Math.round(rel * 100)}%)`
+                            ];
+                        }
+                    }
+                },
+            },
             responsive: true,
             maintainAspectRatio: false,
             scales: {
               y: {
-                title: { display: true, text: 'Громкость' },
-                reverse: true,
+                title: { display: true, text: 'Громкость (дБ)' },
+                reverse: false,
                 min: 0,
-                max: 1,
+                max: 120,
                 ticks: {
-                  stepSize: 0.1
+                  stepSize: 10
                 }
               },
               x: {
@@ -244,11 +299,36 @@ const AudioTester = () => {
   React.useEffect(() => {
         return () => {
         cleanupAudio();
+        calibrateAudio();
         if (chartInstance.current) {
           chartInstance.current.destroy();
         }
       };
     }, []);
+  React.useEffect(() => {
+      if (showResults && responseData) {
+        renderAudiogram(responseData.thresholds, responseData.reliabilities);
+      }
+  }, [showResults, responseData]);
+  React.useEffect(() => {
+      const loadCalibration = async () => {
+          try {
+              const response = await axios.get('http://localhost:8000/api/calibration/');
+              setCalibrationData(response.data.calibration);
+          } catch (error) {
+              console.error('Ошибка загрузки калибровки:', error);
+              // Значения по умолчанию если калибровка не загрузилась
+              setCalibrationData({
+                  '500': {factor: 1.0, max_db: 110},
+                  '1000': {factor: 1.0, max_db: 110},
+                  '2000': {factor: 1.0, max_db: 110},
+                  '4000': {factor: 1.0, max_db: 110},
+                  '8000': {factor: 1.0, max_db: 110}
+              });
+          }
+      };
+      loadCalibration();
+  }, []);
 //    if (showResults) {
 //        renderAudiogram({'500': 0.3, '1000': 0.4, '2000': 0.6, '4000': 0.8, '8000': 1.0});
 //      }
@@ -382,8 +462,16 @@ const AudioTester = () => {
       ) : isRunning ? (
         <div style={{ textAlign: 'center' }}>
           <h3 style={{ color: '#34495e' }}>Частота: {currentFrequency} Гц</h3>
-          <p style={{ fontSize: '18px' }}>Громкость: {Math.round(currentVolume * 100)}%</p>
-
+          <p style={{ fontSize: '18px' }}>Громкость: {Math.round(currentVolumeDb)} дБ</p>
+          <select
+              value={stepSize}
+              onChange={(e) => setStepSize(Number(e.target.value))}
+              style={{ margin: '10px 0', padding: '5px' }} // Добавьте стили
+          >
+              <option value={1}>Точный режим (1 дБ)</option>
+              <option value={2}>Стандартный режим (2 дБ)</option>
+              <option value={5}>Быстрый режим (5 дБ)</option>
+          </select>
           <div style={{ margin: '40px 0' }}>
             <button
               onClick={() => handleResponse(true)}
@@ -419,6 +507,25 @@ const AudioTester = () => {
       ) : (
         <div>
           <h2 style={{ color: '#2c3e50', textAlign: 'center' }}>Результаты теста</h2>
+
+          <div style={{ marginTop: '20px' }}>
+            <h3 style={{ color: '#34495e' }}>Достоверность результатов:</h3>
+            <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
+                  {Object.entries(responseData?.reliabilities || {}).map(([freq, rel]) => (
+                      <div key={freq} style={{
+                          padding: '8px 12px',
+                          backgroundColor: rel >= 0.8 ? '#4bc0c040' : '#ff638440',
+                          borderRadius: '4px',
+                          borderLeft: `4px solid ${rel >= 0.8 ? '#4bc0c0' : '#ff6384'}`
+                      }}>
+                          <div>{freq} Гц</div>
+                          <div style={{ fontWeight: 'bold' }}>
+                              {Math.round(rel * 100)}%
+                          </div>
+                      </div>
+                  ))}
+            </div>
+          </div>
 
           <div style={{ margin: '30px 0', height: '300px' }}>
               <canvas

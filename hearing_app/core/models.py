@@ -24,6 +24,14 @@ class HearingTestResult(models.Model):
     threshold_4000 = models.FloatField(verbose_name="Порог 4000 Гц")
     threshold_8000 = models.FloatField(verbose_name="Порог 8000 Гц")
 
+    reliability_500 = models.FloatField(verbose_name="Достоверность 500 Гц")
+    reliability_1000 = models.FloatField(verbose_name="Достоверность 1000 Гц")
+    reliability_2000 = models.FloatField(verbose_name="Достоверность 2000 Гц")
+    reliability_4000 = models.FloatField(verbose_name="Достоверность 4000 Гц")
+    reliability_8000 = models.FloatField(verbose_name="Достоверность 8000 Гц")
+
+    calibration_data = models.JSONField(verbose_name="Данные калибровки")
+
     diagnosis = models.TextField(verbose_name="Заключение")
     recommendations = models.TextField(blank=True, verbose_name="Рекомендации")
 

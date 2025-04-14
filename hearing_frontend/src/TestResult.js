@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { Chart } from 'chart.js/auto';
@@ -11,50 +11,55 @@ const TestResult = () => {
   const chartInstance = useRef(null);
   const chartRef = useRef(null);
 
-  useEffect(() => {
-    const fetchTestData = async () => {
-      try {
-        const response = await axios.get(`http://localhost:8000/api/results/${testId}/`);
-        setTestData(response.data);
-        renderAudiogram(response.data);
-      } catch (err) {
-        setError('Не удалось загрузить данные теста');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const renderAudiogram = useCallback((thresholds = {}, reliabilities = {}) => {
+    console.log('Rendering audiogram with thresholds:', thresholds, 'reliabilities:', reliabilities);
 
-    fetchTestData();
-  }, [testId]);
+    // Проверка на существование необходимых данных
+    if (!thresholds || !reliabilities) {
+      console.error('Missing thresholds or reliabilities');
+      return;
+    }
 
-  const renderAudiogram = (data) => {
-    if (!chartRef.current || !data) return;
+    // Ждем пока canvas станет доступен
+    if (!chartRef.current) {
+      console.error('Canvas ref not available - retrying in 100ms');
+      setTimeout(() => renderAudiogram(thresholds, reliabilities), 100);
+      return;
+    }
 
     const ctx = chartRef.current.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.error('Could not get canvas context');
+      return;
+    }
 
+    // Удаляем предыдущий график
     if (chartInstance.current) {
       chartInstance.current.destroy();
     }
 
+    // Нормативные значения
     const normThresholds = {
-      '500': 0.1,
-      '1000': 0.08,
-      '2000': 0.05,
-      '4000': 0.03,
-      '8000': 0.02
+      '500': 20,
+      '1000': 15,
+      '2000': 10,
+      '4000': 5,
+      '8000': 0
     };
 
+    // Подготовка данных с защитой от undefined
     const labels = ['500', '1000', '2000', '4000', '8000'].map(f => `${f} Гц`);
-    const userData = [
-      data.threshold_500,
-      data.threshold_1000,
-      data.threshold_2000,
-      data.threshold_4000,
-      data.threshold_8000
-    ];
-    const normData = labels.map(label => normThresholds[label.split(' ')[0]] || 0);
+    const userData = labels.map(label => {
+      const freq = label.split(' ')[0];
+      return thresholds[freq] !== undefined ? thresholds[freq] : null;
+    });
+
+    const normData = labels.map(label => normThresholds[label.split(' ')[0]]);
+    const reliabilityColors = labels.map(label => {
+      const freq = label.split(' ')[0];
+      const rel = reliabilities[freq] || 0; // Защита от undefined
+      return rel >= 0.8 ? '#4bc0c0' : '#ff6384';
+    });
 
     try {
       chartInstance.current = new Chart(ctx, {
@@ -63,33 +68,53 @@ const TestResult = () => {
           labels: labels,
           datasets: [
             {
-              label: 'Слух пациента',
+              label: 'Ваш слух',
               data: userData,
-              borderColor: '#4bc0c0',
-              backgroundColor: 'rgba(75, 192, 192, 0.2)',
-              tension: 0.1,
-              pointRadius: 6
+              borderColor: reliabilityColors,
+              backgroundColor: reliabilityColors.map(c => `${c}40`),
+              borderWidth: 2,
+              pointBackgroundColor: reliabilityColors,
+              pointRadius: 6,
+              pointHoverRadius: 8,
+              showLine: true,
+              spanGaps: true,
             },
             {
               label: 'Норма',
               data: normData,
               borderColor: '#ff6384',
               borderDash: [5, 5],
-              pointRadius: 4
+              pointRadius: 4,
+              backgroundColor: 'rgba(255, 99, 132, 0.1)'
             }
           ]
         },
         options: {
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const freq = context.label.split(' ')[0];
+                  const rel = reliabilities[freq] || 0;
+                  const relText = rel >= 0.8 ? 'Высокая' : 'Низкая';
+                  return [
+                    `${context.dataset.label}: ${context.parsed.y} дБ`,
+                    `Достоверность: ${relText} (${Math.round(rel * 100)}%)`
+                  ];
+                }
+              }
+            },
+          },
           responsive: true,
           maintainAspectRatio: false,
           scales: {
             y: {
-              title: { display: true, text: 'Громкость' },
-              reverse: true,
+              title: { display: true, text: 'Громкость (дБ)' },
+              reverse: false,
               min: 0,
-              max: 1,
+              max: 120,
               ticks: {
-                stepSize: 0.1
+                stepSize: 10
               }
             },
             x: {
@@ -101,7 +126,28 @@ const TestResult = () => {
     } catch (error) {
       console.error('Chart error:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const fetchTestData = async () => {
+      try {
+        const response = await axios.get(`http://localhost:8000/api/results/${testId}/`);
+        setTestData(response.data);
+
+        // Добавляем небольшую задержку для гарантированной доступности canvas
+        setTimeout(() => {
+          renderAudiogram(response.data.thresholds || {}, response.data.reliabilities || {});
+        }, 100);
+      } catch (err) {
+        setError('Не удалось загрузить данные теста');
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTestData();
+  }, [testId, renderAudiogram]);
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
